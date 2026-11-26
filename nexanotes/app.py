@@ -142,7 +142,7 @@ class Controller(QObject):
             # nuestras ventanas van por encima de la capa más alta de esa mesa.
             layers = winapi.table_layers(h, self.settings["title_keyword"])
             self.layers[h] = layers
-            below = layers[-1] if layers else h
+            below = winapi.group_top(layers[-1] if layers else h)
             if ov.isVisible():
                 winapi.place_just_above(ov.native, below)
                 below = ov.native
@@ -216,15 +216,21 @@ class Controller(QObject):
                 b.sid = 0
                 b.hide()
         # tiras de color (4 por jugador con color asignado)
-        colored = [(s, ov._color_for(s)) for s in ov.view] if ov is not None else []
-        colored = [(s, c) for s, c in colored if c]
+        colored = []
+        if ov is not None:
+            for s in ov.view:
+                c = ov._color_for(s)
+                if c:
+                    colored.append((s, c, False))
+                elif self.settings["diagnostic"]:
+                    colored.append((s, "#e5e7eb", True))  # diagnóstico: etiqueta detectada sin color
         spool = self.strips.setdefault(hwnd, [])
         while len(spool) < 4 * len(colored):
             spool.append(BorderStrip(hwnd))
         for i, st in enumerate(spool):
             if i < 4 * len(colored):
-                seat, col = colored[i // 4]
-                st.sid, st.side, st.active = seat.sid, i % 4, True
+                seat, col, thin = colored[i // 4]
+                st.sid, st.side, st.active, st.thin = seat.sid, i % 4, True, thin
                 st.set_color(col)
             else:
                 st.active = False
@@ -257,7 +263,7 @@ class Controller(QObject):
             x, y, w, h = s.rect
             X, Y = rc[0] + int(round(x * sx)), rc[1] + int(round(y * sy))
             Wd, Ht = int(round(w * sx)), int(round(h * sy))
-            t = max(2, int(round(Wd * 0.03)))   # grosor
+            t = 1 if getattr(st, "thin", False) else max(2, int(round(Wd * 0.03)))   # grosor
             g = 1                                # separación con la etiqueta
             if st.side == 0:    # arriba
                 st.setGeometry(X - g - t, Y - g - t, Wd + 2 * (g + t), t)
@@ -479,7 +485,9 @@ class DiagnosticsWindow(QWidget):
                 capas = c.layers.get(h, [])
                 out.append("<p>Capas de Nexa encima de la mesa: " + (
                     "<br>".join(e(winapi.describe_window(x)) for x in capas) or "ninguna") + "</p>")
-                encima_txt = e(winapi.describe_window(winapi.window_above(capas[-1] if capas else h)))
+                gt = winapi.group_top(capas[-1] if capas else h)
+                encima_txt = (f"grupo de la mesa hasta {e(winapi.describe_window(gt))}<br>encima del grupo: "
+                              f"{e(winapi.describe_window(winapi.window_above(gt)))}")
                 activos = [st for st in c.strips.get(h, []) if st.active]
                 botones = [b for b in c.buttons.get(h, []) if b.sid]
                 out.append(f"<p>Encima de la capa más alta: {encima_txt}<br>"

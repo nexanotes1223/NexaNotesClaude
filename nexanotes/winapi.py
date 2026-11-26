@@ -515,6 +515,24 @@ def table_layers(table_hwnd: int, title_keyword: str = "Blinds") -> list[int]:
     return out
 
 
+def group_top(table_hwnd: int) -> int:
+    """La mesa y las ventanas que le pertenecen (propiedad de la mesa, aunque estén
+    ocultas, como la ventana «Default IME») van siempre juntas en el orden de
+    ventanas. Devuelve la más alta del grupo: nuestras ventanas deben ir encima de
+    ella; si se meten entre la mesa y sus ventanas, Windows las manda detrás."""
+    top = table_hwnd
+    h = window_above(table_hwnd)
+    steps = 0
+    while h and steps < 30:
+        steps += 1
+        if window_owner(h) == table_hwnd:
+            top = h
+        elif window_pid(h) != os.getpid():
+            break
+        h = window_above(h)
+    return top
+
+
 def place_just_above(our_hwnd: int, target_hwnd: int) -> None:
     """Coloca nuestra ventana justo encima de target en el orden de ventanas, sin
     activarla: queda tapada por las mismas ventanas que tapan la mesa."""
@@ -523,9 +541,11 @@ def place_just_above(our_hwnd: int, target_hwnd: int) -> None:
     above = window_above(target_hwnd)
     if above == our_hwnd:
         return
-    if above:
-        insert_after = above
+    if above and is_topmost(above) == is_topmost(target_hwnd):
+        insert_after = above  # queda justo debajo de la ventana que tapa la mesa
     else:
+        # nada encima, o encima solo hay ventanas "siempre visibles" (barra de
+        # tareas...): primera posición de su nivel, sin volverse "siempre visible"
         insert_after = HWND_TOPMOST if is_topmost(target_hwnd) else HWND_TOP
     user32.SetWindowPos(our_hwnd, insert_after, 0, 0, 0, 0,
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER)

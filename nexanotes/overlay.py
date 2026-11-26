@@ -75,7 +75,9 @@ class TableOverlay(QWidget):
         self.update()
 
     def has_content(self) -> bool:
-        return self.diagnostic
+        # La ventana transparente grande no se ve con Nexa en Windows; el modo
+        # diagnóstico ahora dibuja con tiras sólidas (como los colores).
+        return False
 
     def _color_for(self, s) -> str | None:
         if s.status == UNCERTAIN or not s.display_name or s.display_name == self.my_nick:
@@ -144,7 +146,7 @@ class SeatButton(QWidget):
 
     def ensure_owned(self):
         if not self._owned:
-            self.native = _prepare_native(self, exclude_capture=True)
+            self.native = _prepare_native(self, exclude_capture=False)
             self._owned = True
 
     def enterEvent(self, _e):
@@ -198,7 +200,7 @@ class BorderStrip(QWidget):
 
     def ensure_owned(self):
         if not self._owned:
-            self.native = _prepare_native(self, exclude_capture=True)
+            self.native = _prepare_native(self, exclude_capture=False)
             self._owned = True
 
     def paintEvent(self, _e):
