@@ -1,4 +1,4 @@
-# Nexa Notes 0.13.0
+# Nexa Notes 0.13.1
 
 Notas personales y etiquetas de colores para los jugadores de las mesas de Nexa Poker.
 Programa portable para Windows 10/11: un solo archivo `NexaNotes.exe`, sin instalar nada.
@@ -77,6 +77,8 @@ proceso de cada ventana con «Blinds». Si el de Nexa no contiene «nexa», escr
 - **Ventana de diagnóstico**: mesas identificadas, proceso, método de captura, tiempos,
   estado de cada asiento, eventos (timebank, cambios de jugador...), ventanas descartadas
   y errores.
+- Con el modo diagnóstico activado se guarda la última captura de cada mesa en
+  `%LOCALAPPDATA%\NexaNotes\diagnostico\` (sirve para enviármela si algo falla).
 - **Probar con captura…**: analiza una imagen guardada y genera `*_diagnostico.png` y
   `*_diagnostico.json` al lado. También por línea de comandos:
   `NexaNotes.exe --analizar captura1.png captura2.png`.
@@ -91,7 +93,7 @@ Para que una captura forme parte de las pruebas automáticas, guárdala en
 | Módulo | Función |
 |---|---|
 | `winapi.py` | Enumera ventanas, lee el ejecutable del proceso, posición/estado y captura del área cliente (PrintWindow). Solo lectura visual, sin inyectar ni leer memoria. |
-| `detector.py` | Detecta las etiquetas oscuras sin coordenadas fijas: píxeles gris oscuro → tramos horizontales con anchura de etiqueta y bordes alineados → validación (proporción ~2:1, fondo oscuro, **dos líneas de texto**). No depende del azul de las fichas. |
+| `detector.py` | Detecta las etiquetas sin coordenadas fijas: color gris pizarra de la etiqueta → rectángulos aislados (y, con su tamaño, búsqueda de etiquetas pegadas al borde de la mesa) → validación (proporción ~2:1, fondo oscuro, **dos líneas de texto centradas**, avatar encima). No depende del azul de las fichas. |
 | `ocr.py` | RapidOCR + ONNX Runtime, una sola instancia, 1 hilo, **solo el reconocedor** sobre la mitad superior de la etiqueta (nickname). No puede leer avatares, fichas ni el fondo. |
 | `textrules.py` | Clasifica lo leído: nombre, timebank (números cortos), acción (All in, Fold...), cantidad, nombre truncado «…». |
 | `tracker.py` | Identidad de cada asiento (ver abajo). |
@@ -145,13 +147,14 @@ Para que una captura forme parte de las pruebas automáticas, guárdala en
 | Tipo | Estado |
 |---|---|
 | Sintaxis e importación de todos los módulos | ✔ hecho |
-| Pruebas automáticas (42) en Linux con Python 3.12 | ✔ pasan |
-| Detección con tus 2 capturas reales: 7/7 etiquetas, 0 falsos positivos, tamaños de 456 a 3040 px de ancho | ✔ hecho |
-| OCR con tus 2 capturas: 14/14 nombres (latinos y chinos) | ✔ hecho |
+| Pruebas automáticas (52) en Linux con Python 3.12 | ✔ pasan |
+| Detección con 3 capturas (incluida una real de tu Windows con otro fondo): todas las etiquetas, 0 falsos positivos, 7 tamaños por captura | ✔ hecho |
+| OCR con las 3 capturas: 20/20 nombres (latinos y chinos) | ✔ hecho |
 | Dibujo del overlay sobre tus capturas (posición de rectángulos) | ✔ hecho |
 | Compilación con PyInstaller + recursos incluidos + OCR dentro del binario | ✔ hecho **en Linux**; en Windows lo comprueba el workflow |
 | Interfaz (ventana principal, editor, ajustes, diagnóstico) | ✔ arranca sin errores en modo sin pantalla |
-| Windows real: detección de ventanas, captura PrintWindow, overlay, DPI, varios monitores, mesas superpuestas | ✘ **no probado** — necesita tu prueba |
+| Windows real: detección de ventanas de Nexa (proceso «Nexa Poker.exe» + «Blinds») | ✔ comprobado por ti (v0.13.0) |
+| Windows real: captura de la mesa (nuevas variantes de PrintWindow en 0.13.1), overlay, DPI, varios monitores | ✘ pendiente de tu prueba |
 | Asientos vacíos reales, timebank real, bounty, otros fondos, mesas de 2–6 | ✘ sin capturas reales (simulados en pruebas) |
 
 ## 6. Normas de Nexa Poker

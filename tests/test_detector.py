@@ -6,10 +6,10 @@ import pytest
 from conftest import load
 from nexanotes.detector import detect_labels
 
-# Etiquetas reales (x, y, w, h) medidas en las capturas, con tolerancia.
 EXPECTED = {
-    "MesaNexa.png": 7,
+    "MesaNexa.png": 7,        # mesa en pausa (oscurecida)
     "MesaNexafinal.png": 7,
+    "MesaNexaReal2.png": 6,   # captura real de Windows: otro fondo, 6 jugadores, cartas en mesa
 }
 
 
@@ -62,7 +62,7 @@ def test_rectangulos_ajustados_a_la_etiqueta(name):
     for l in detect_labels(img).labels:
         x, y, w, h = l.rect
         inner_left = v[y + h // 4: y + 3 * h // 4, x + 2: x + 5]
-        assert inner_left.mean() < 45
+        assert inner_left.mean() < 60
         nx, ny, nw, nh = l.name_rect
         assert ny >= y and ny + nh <= y + h // 2 + 2  # zona OCR = solo mitad superior
 

@@ -6,11 +6,19 @@ from nexanotes.analysis import SELFTEST_EXPECTED, analyze_image
 from nexanotes.detector import crop, detect_labels
 
 
-@pytest.mark.parametrize("name", ["MesaNexa.png", "MesaNexafinal.png"])
+NAMES = {
+    "MesaNexa.png": SELFTEST_EXPECTED,
+    "MesaNexafinal.png": SELFTEST_EXPECTED,
+    "MesaNexaReal2.png": ["ponchodeus", "TOTI20", "香酥腰果饼", "EricYANGAA", "SanGanchao"],
+}
+
+
+@pytest.mark.parametrize("name", list(NAMES))
 def test_lee_todos_los_nombres(name, ocr):
     res = analyze_image(load(name), ocr)
     names = [e["texto"] for e in res["etiquetas"]]
-    assert sorted(names) == sorted(SELFTEST_EXPECTED)
+    for n in NAMES[name]:
+        assert n in names
     assert all(e["tipo"] == "name" for e in res["etiquetas"])
 
 

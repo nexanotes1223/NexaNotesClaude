@@ -386,6 +386,8 @@ class DiagnosticsWindow(QWidget):
         c = self.ctl
         e = html.escape
         out = [f"<h3>{APP_NAME} {VERSION}</h3>"]
+        out.append(f"<p>Pantalla: {e(winapi.dpi_awareness())} · capturas de diagnóstico en "
+                   f"{e(str(APP_DIR / 'diagnostico'))}</p>")
         out.append(f"<p>OCR: {'error: ' + e(c.ocr.init_error) if c.ocr.init_error else 'listo'} · "
                    f"reconocimiento {'activado' if c.settings['recognition_enabled'] else 'desactivado'} · "
                    f"último error: {e(c.worker.last_error) or 'ninguno'}</p>")

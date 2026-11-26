@@ -70,6 +70,7 @@ class TableState:
     error: str = ""
     skipped: str = ""
     view: tuple = ()          # tuple[SeatView]: lo que dibuja el overlay
+    last_saved: float = 0.0
 
 
 def match_tables(windows, process_keywords, title_keyword):
@@ -176,6 +177,23 @@ class AnalysisWorker(QObject):
                 log.error("Error analizando mesa %s\n%s", t.hwnd, traceback.format_exc())
             self.table_updated.emit(t.hwnd)
 
+    def _save_capture(self, t: TableState, img):
+        """Modo diagnóstico: guarda la última captura de cada mesa (para revisarla)."""
+        now = time.monotonic()
+        if now - t.last_saved < 10:
+            return
+        t.last_saved = now
+        try:
+            import cv2
+            from .config import APP_DIR
+            d = APP_DIR / "diagnostico"
+            d.mkdir(parents=True, exist_ok=True)
+            ok, buf = cv2.imencode(".png", img)
+            if ok:
+                buf.tofile(str(d / f"mesa_{t.hwnd}.png"))
+        except Exception:
+            log.exception("No se pudo guardar la captura de diagnóstico")
+
     def _analyze(self, t: TableState):
         t0 = time.perf_counter()
         img, method = winapi.capture_client(t.hwnd)
@@ -191,6 +209,8 @@ class AnalysisWorker(QObject):
             t.skipped = "mesa tapada y no capturable con PrintWindow: se espera"
             t.last_analysis = time.monotonic()
             return
+        if self.settings["diagnostic"]:
+            self._save_capture(t, img)
         det = detect_labels(img)
         t2 = time.perf_counter()
         ocr_fn = self.ocr.recognize if self.ocr.init_error is None else None

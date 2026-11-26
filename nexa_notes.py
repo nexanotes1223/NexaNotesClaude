@@ -92,6 +92,8 @@ def run_gui() -> int:
     from nexanotes.config import APP_DIR, DB_PATH, Settings
     from nexanotes.db import Database
 
+    from nexanotes import winapi
+    winapi.set_dpi_aware()  # coordenadas físicas en todos los monitores
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")

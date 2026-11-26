@@ -56,6 +56,14 @@ if IS_WINDOWS:
     user32.SetWindowLongPtrW.restype = LONG_PTR
     user32.SetWindowPos.argtypes = [HWND, HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
     user32.GetForegroundWindow.restype = HWND
+    user32.GetWindowRect.argtypes = [HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetWindowDC.argtypes = [HWND]
+    user32.GetWindowDC.restype = wintypes.HDC
+    user32.GetWindow.argtypes = [HWND, wintypes.UINT]
+    user32.GetWindow.restype = HWND
+    user32.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+    user32.GetAwarenessFromDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+    user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
     gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
     gdi32.CreateCompatibleDC.restype = wintypes.HDC
     gdi32.CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
@@ -93,6 +101,7 @@ PW_CLIENTONLY = 0x1
 PW_RENDERFULLCONTENT = 0x2
 SRCCOPY = 0x00CC0020
 GA_ROOT = 2
+GW_OWNER = 4
 DWMWA_CLOAKED = 14
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOZORDER = 0x1, 0x2, 0x10, 0x4
 SWP_NOOWNERZORDER = 0x200
@@ -208,52 +217,121 @@ def _dib_to_array(hdc, hbmp, w, h) -> np.ndarray | None:
     return np.ascontiguousarray(buf[..., :3])  # BGR
 
 
-def capture_client(hwnd: int) -> tuple[np.ndarray | None, str]:
-    """Captura el área cliente de una ventana.
+def _is_blank(img: np.ndarray | None) -> bool:
+    if img is None or img.size == 0:
+        return True
+    small = img[::8, ::8]
+    return int(small.max()) < 8 or float(small.std()) < 2.0
 
-    1) PrintWindow(PW_CLIENTONLY|PW_RENDERFULLCONTENT): obtiene el contenido aunque
-       la ventana esté parcialmente tapada por otras.
-    2) Si devuelve una imagen negra, se copia desde la pantalla (solo es válido si
-       la mesa está visible; quien llama lo comprueba con is_fully_visible()).
-    Devuelve (imagen BGR, método).
-    """
+
+def window_rect(hwnd: int) -> tuple[int, int, int, int] | None:
     if not IS_WINDOWS:
-        return None, "no-windows"
-    rc = client_rect_screen(hwnd)
-    if not rc or rc[2] < 50 or rc[3] < 50:
-        return None, "tamaño inválido"
-    x, y, w, h = rc
-    hdc_win = user32.GetDC(hwnd)
+        return None
+    r = wintypes.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(r)):
+        return None
+    return (r.left, r.top, r.right - r.left, r.bottom - r.top)
+
+
+def _print_window(hwnd: int, w: int, h: int, flags: int) -> np.ndarray | None:
+    hdc_win = user32.GetWindowDC(hwnd)
     if not hdc_win:
-        return None, "GetDC falló"
+        return None
     mem = gdi32.CreateCompatibleDC(hdc_win)
     bmp = gdi32.CreateCompatibleBitmap(hdc_win, w, h)
     old = gdi32.SelectObject(mem, bmp)
-    img, method = None, ""
     try:
-        if user32.PrintWindow(hwnd, mem, PW_CLIENTONLY | PW_RENDERFULLCONTENT):
-            img = _dib_to_array(mem, bmp, w, h)
-            method = "PrintWindow"
-            if img is not None and img.max() < 8:
-                img = None  # negra: la ventana no se deja capturar así
-        if img is None:
-            hdc_scr = user32.GetDC(None)
-            try:
-                if gdi32.BitBlt(mem, 0, 0, w, h, hdc_scr, x, y, SRCCOPY):
-                    img = _dib_to_array(mem, bmp, w, h)
-                    method = "pantalla"
-            finally:
-                user32.ReleaseDC(None, hdc_scr)
+        if not user32.PrintWindow(hwnd, mem, flags):
+            return None
+        return _dib_to_array(mem, bmp, w, h)
     finally:
         gdi32.SelectObject(mem, old)
         gdi32.DeleteObject(bmp)
         gdi32.DeleteDC(mem)
         user32.ReleaseDC(hwnd, hdc_win)
-    return img, method
+
+
+def _screen_grab(x: int, y: int, w: int, h: int) -> np.ndarray | None:
+    hdc_scr = user32.GetDC(None)
+    if not hdc_scr:
+        return None
+    mem = gdi32.CreateCompatibleDC(hdc_scr)
+    bmp = gdi32.CreateCompatibleBitmap(hdc_scr, w, h)
+    old = gdi32.SelectObject(mem, bmp)
+    try:
+        if not gdi32.BitBlt(mem, 0, 0, w, h, hdc_scr, x, y, SRCCOPY):
+            return None
+        return _dib_to_array(mem, bmp, w, h)
+    finally:
+        gdi32.SelectObject(mem, old)
+        gdi32.DeleteObject(bmp)
+        gdi32.DeleteDC(mem)
+        user32.ReleaseDC(None, hdc_scr)
+
+
+# Método que funcionó la última vez para cada ventana (se prueba primero).
+_last_method: dict[int, str] = {}
+
+
+def capture_client(hwnd: int) -> tuple[np.ndarray | None, str]:
+    """Captura el área cliente de una ventana sin tocarla.
+
+    Se prueban varias variantes de PrintWindow (funcionan aunque la mesa esté
+    parcialmente tapada y no incluyen nuestras superposiciones). Algunas
+    aplicaciones con aceleración gráfica devuelven una imagen negra con una
+    variante y correcta con otra. Si todas fallan, se copia desde la pantalla
+    (solo válido si la mesa está visible: quien llama lo comprueba).
+    Devuelve (imagen BGR, método usado).
+    """
+    if not IS_WINDOWS:
+        return None, "no-windows"
+    rc = client_rect_screen(hwnd)
+    wr = window_rect(hwnd)
+    if not rc or not wr or rc[2] < 50 or rc[3] < 50:
+        return None, "tamaño inválido"
+    cx, cy, cw, ch = rc
+    wx, wy, ww, wh = wr
+    ox, oy = cx - wx, cy - wy  # posición del área cliente dentro de la ventana
+
+    def full_window(flags):
+        img = _print_window(hwnd, ww, wh, flags)
+        if img is None or img.shape[0] < oy + ch or img.shape[1] < ox + cw or ox < 0 or oy < 0:
+            return None
+        return np.ascontiguousarray(img[oy:oy + ch, ox:ox + cw])
+
+    def client_only(flags):
+        img = _print_window(hwnd, ww, wh, flags | PW_CLIENTONLY)
+        return None if img is None else np.ascontiguousarray(img[:ch, :cw])
+
+    variants = {
+        "PrintWindow-completa": lambda: full_window(PW_RENDERFULLCONTENT),
+        "PrintWindow-cliente": lambda: client_only(PW_RENDERFULLCONTENT),
+        "PrintWindow-clasico": lambda: full_window(0),
+    }
+    order = list(variants)
+    last = _last_method.get(hwnd)
+    if last in variants:
+        order.remove(last)
+        order.insert(0, last)
+    for name in order:
+        try:
+            img = variants[name]()
+        except Exception:  # pragma: no cover
+            log.exception("captura %s", name)
+            img = None
+        if not _is_blank(img):
+            _last_method[hwnd] = name
+            return img, name
+    img = _screen_grab(cx, cy, cw, ch)
+    if not _is_blank(img):
+        _last_method.pop(hwnd, None)
+        return img, "pantalla"
+    return None, "todas las capturas vacías"
 
 
 def is_fully_visible(hwnd: int) -> bool:
-    """Comprueba (con 9 puntos) que ninguna otra ventana tapa la mesa."""
+    """Comprueba (con 9 puntos) que ninguna otra ventana tapa la mesa. Las ventanas
+    propiedad de la mesa (nuestras superposiciones) no cuentan como tapadas."""
     if not IS_WINDOWS:
         return False
     rc = client_rect_screen(hwnd)
@@ -265,9 +343,46 @@ def is_fully_visible(hwnd: int) -> bool:
             p = wintypes.POINT(int(x + w * fx), int(y + h * fy))
             hit = user32.WindowFromPoint(p)
             root = user32.GetAncestor(hit, GA_ROOT) if hit else None
-            if not root or int(root) != int(hwnd):
+            if not root:
                 return False
+            if int(root) == int(hwnd):
+                continue
+            owner = user32.GetWindow(root, GW_OWNER)
+            if owner and int(owner) == int(hwnd):
+                continue
+            return False
     return True
+
+
+def dpi_awareness() -> str:
+    """Modo DPI del proceso (diagnóstico)."""
+    if not IS_WINDOWS:
+        return "no-windows"
+    try:
+        ctx = user32.GetThreadDpiAwarenessContext()
+        aw = user32.GetAwarenessFromDpiAwarenessContext(ctx)
+        return {0: "sin DPI (coordenadas virtualizadas)", 1: "DPI de sistema",
+                2: "DPI por monitor"}.get(aw, str(aw))
+    except Exception:
+        return "desconocido"
+
+
+def set_dpi_aware() -> None:
+    """Coordenadas físicas en todos los monitores (antes de crear la interfaz)."""
+    if not IS_WINDOWS:
+        return
+    try:
+        if user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):  # PER_MONITOR_AWARE_V2
+            return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
 
 def set_owner(child_hwnd: int, owner_hwnd: int) -> None:
