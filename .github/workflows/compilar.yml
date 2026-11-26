@@ -1,0 +1,73 @@
+name: Compilar NexaNotes.exe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Descargar el proyecto
+        uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+          cache: pip
+
+      - name: "1. Instalar dependencias"
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          python -c "import PySide6, rapidocr_onnxruntime, onnxruntime, cv2, numpy; print('Dependencias OK', onnxruntime.__version__)"
+
+      - name: "2. Comprobar el OCR antes de compilar"
+        run: |
+          python nexa_notes.py --selftest --out selftest_python.json
+          if ($LASTEXITCODE -ne 0) { Write-Error "El OCR no funciona con el código fuente"; exit 1 }
+
+      - name: "3. Pruebas automáticas"
+        run: |
+          python -m pytest -v tests
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: "4. Compilar el ejecutable"
+        run: |
+          pyinstaller --noconfirm --clean NexaNotes.spec
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: "5. Verificar los recursos incluidos en el ejecutable"
+        run: |
+          python tools/verificar_exe.py dist/NexaNotes.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: "6. Comprobar el OCR dentro del ejecutable"
+        run: |
+          $p = Start-Process -FilePath "dist\NexaNotes.exe" -ArgumentList "--selftest","--out","selftest_exe.json" -PassThru
+          $null = $p.Handle
+          if (-not $p.WaitForExit(300000)) { $p.Kill(); Write-Error "El ejecutable no terminó en 5 minutos"; exit 1 }
+          $code = $p.ExitCode
+          Write-Host "Código de salida del ejecutable: $code"
+          if (-not (Test-Path selftest_exe.json)) { Write-Error "El ejecutable no generó el informe"; exit 1 }
+          Get-Content selftest_exe.json -Encoding utf8
+          $r = Get-Content selftest_exe.json -Raw -Encoding utf8 | ConvertFrom-Json
+          if ($code -ne 0 -or $r.resultado -ne "OK") { Write-Error "El OCR no funciona dentro del ejecutable"; exit 1 }
+          Write-Host "OCR dentro del ejecutable: OK"
+
+      - name: "7. Publicar NexaNotes.exe para descargar"
+        uses: actions/upload-artifact@v4
+        with:
+          name: NexaNotes-Windows
+          path: |
+            dist/NexaNotes.exe
+            selftest_exe.json
+          if-no-files-found: error
