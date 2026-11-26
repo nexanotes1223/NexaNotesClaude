@@ -21,6 +21,7 @@ _ACTIONS = {
 }
 _TIMEBANK_RE = re.compile(r"^\d{1,3}\s*[sS]?$|^\d{1,2}[:：.]\d{2}$")
 _AMOUNT_RE = re.compile(r"^[¥$€£]?[\d.,]*\d[\d.,]*(K|M|BB)?$", re.IGNORECASE)
+_ACTION_PREFIX_RE = re.compile(r"^\W*(ALL ?-?IN|FOLD|CHECK|CALL|BET|RAISE)\b", re.IGNORECASE)
 _ELLIPSIS_RE = re.compile(r"(\.{2,}|…|。。+|··+)\s*$")
 
 
@@ -40,15 +41,25 @@ def classify(text: str, score: float) -> tuple[str, str]:
         prefix = t[: m.start()].strip()
         return (TRUNCATED, prefix) if len(prefix) >= 2 else (NOISE, t)
     compact = re.sub(r"[\s\-_!.]", "", t).upper()
-    if compact in _ACTIONS:
-        return ACTION, t
-    if _TIMEBANK_RE.match(t):
+    if compact in _ACTIONS or _ACTION_PREFIX_RE.match(t):
+        return ACTION, t  # incluye "Call 0.5BB", "Raise 2BB"...
+    if _TIMEBANK_RE.match(t) or _looks_like_timer(t):
         return TIMEBANK, t
     if _AMOUNT_RE.match(t.replace(" ", "")) and not t.isdigit():
         return NOISE, t  # cantidad de fichas, BB o importe (p. ej. 9.8BB, ¥1,372)
     if len(t) < 2 and not _is_cjk(t):
         return NOISE, t
     return NAME, t
+
+
+def _looks_like_timer(t: str) -> bool:
+    """Contador con iconos que el OCR lee como caracteres sueltos (p. ej. '時10時'):
+    texto corto, 1-3 cifras seguidas y sin letras latinas."""
+    t2 = t.replace(" ", "")
+    if len(t2) > 6 or any("a" <= ch.lower() <= "z" for ch in t2):
+        return False
+    runs = re.findall(r"\d+", t2)
+    return len(runs) == 1 and 1 <= len(runs[0]) <= 3 and len(t2) - len(runs[0]) <= 3
 
 
 def _is_cjk(t: str) -> bool:

@@ -6,9 +6,9 @@ Cada mesa tiene:
   * SeatButton: botón diminuto junto a cada etiqueta reconocida, que abre el
     editor. Es la única zona interactiva y está fuera del nickname, las fichas
     y los botones del cliente.
-Las dos son ventanas "propiedad" (owned) de la mesa: Windows las mantiene justo
-encima de su mesa en el orden de ventanas, las tapa cuando otra ventana tapa la
-mesa y las oculta cuando la mesa se minimiza.
+Las dos se colocan justo encima de su mesa en el orden de ventanas (sin
+activarse): quedan tapadas por las mismas ventanas que tapan la mesa, y se
+ocultan cuando la mesa se minimiza o se cierra.
 """
 from __future__ import annotations
 
@@ -20,20 +20,27 @@ from . import winapi
 from .tracker import UNCERTAIN
 
 
-def _apply_owner(widget: QWidget, owner_hwnd: int, click_through: bool):
+def _prepare_native(widget: QWidget, exclude_capture: bool):
+    """Estilos de Windows: sin activar ni robar el foco, fuera de la barra de tareas
+    y, para el dibujo, transparente a los clics. El orden respecto a la mesa se
+    ajusta después con winapi.place_just_above()."""
     hwnd = int(widget.winId())
-    winapi.set_owner(hwnd, owner_hwnd)
-    flags = winapi.WS_EX_NOACTIVATE | winapi.WS_EX_TOOLWINDOW
-    if click_through:
-        flags |= winapi.WS_EX_LAYERED | winapi.WS_EX_TRANSPARENT
-    winapi.add_ex_style(hwnd, flags, remove=winapi.WS_EX_TOPMOST)
+    # Importante: NO se añade WS_EX_LAYERED a mano. Qt ya prepara la ventana
+    # transparente; marcarla como "layered" por nuestra cuenta la vuelve invisible
+    # (era el fallo de la 0.13.1: se veían los botones pero no los rectángulos).
+    # Que los clics atraviesen el dibujo lo hace Qt con WindowTransparentForInput.
+    winapi.add_ex_style(hwnd, winapi.WS_EX_NOACTIVATE | winapi.WS_EX_TOOLWINDOW, remove=winapi.WS_EX_TOPMOST)
+    winapi.exclude_from_capture(hwnd, exclude_capture)
+    return hwnd
 
 
 class TableOverlay(QWidget):
+    """Dibujo del modo diagnóstico (ventana transparente que deja pasar los clics).
+    Los rectángulos de color NO se dibujan aquí, sino con BorderStrip (más fiable)."""
+
     def __init__(self, table_hwnd: int):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
-                         | Qt.WindowType.WindowTransparentForInput | Qt.WindowType.WindowDoesNotAcceptFocus
-                         | Qt.WindowType.NoDropShadowWindowHint)
+                         | Qt.WindowType.WindowDoesNotAcceptFocus | Qt.WindowType.NoDropShadowWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -46,11 +53,21 @@ class TableOverlay(QWidget):
         self.rejected = []
         self.header = ""
         self._owned = False
+        self.native = 0
 
     def ensure_owned(self):
         if not self._owned:
-            _apply_owner(self, self.table_hwnd, click_through=True)
+            self.native = _prepare_native(self, exclude_capture=not self.diagnostic)
+            # La transparencia de Qt ya la hace "layered"; con WS_EX_TRANSPARENT los
+            # clics la atraviesan y llegan a la mesa.
+            st = winapi.ex_style(self.native)
+            if st & winapi.WS_EX_LAYERED:
+                winapi.add_ex_style(self.native, winapi.WS_EX_TRANSPARENT)
             self._owned = True
+
+    def set_capture_exclusion(self):
+        if self._owned:
+            winapi.exclude_from_capture(self.native, not self.diagnostic)
 
     def set_data(self, view, frame_size, colors, my_nick, diagnostic, rejected, header):
         self.view, self.frame_size, self.colors = view, frame_size, colors
@@ -58,9 +75,7 @@ class TableOverlay(QWidget):
         self.update()
 
     def has_content(self) -> bool:
-        if self.diagnostic:
-            return True
-        return any(self._color_for(s) for s in self.view)
+        return self.diagnostic
 
     def _color_for(self, s) -> str | None:
         if s.status == UNCERTAIN or not s.display_name or s.display_name == self.my_nick:
@@ -79,17 +94,6 @@ class TableOverlay(QWidget):
     def paintEvent(self, _ev):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        for s in self.view:
-            r = self._map(s.rect)
-            col = self._color_for(s)
-            if col:
-                pw = max(2.0, round(r.width() * 0.03))
-                pen = QPen(QColor(col), pw)
-                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-                p.setPen(pen)
-                p.setBrush(Qt.BrushStyle.NoBrush)
-                m = pw / 2 + 1  # por fuera de la etiqueta: no tapa texto
-                p.drawRoundedRect(r.adjusted(-m, -m, m, m), r.height() * 0.12 + m, r.height() * 0.12 + m)
         if self.diagnostic:
             self._paint_diagnostic(p)
         p.end()
@@ -135,11 +139,12 @@ class SeatButton(QWidget):
         self.color: str | None = None
         self.hover = False
         self._owned = False
+        self.native = 0
         self.setToolTip("Nexa Notes: color y notas")
 
     def ensure_owned(self):
         if not self._owned:
-            _apply_owner(self, self.table_hwnd, click_through=False)
+            self.native = _prepare_native(self, exclude_capture=True)
             self._owned = True
 
     def enterEvent(self, _e):
@@ -167,4 +172,36 @@ class SeatButton(QWidget):
         p.setPen(QPen(QColor(235, 235, 235), max(1.2, r.width() * 0.09), Qt.PenStyle.SolidLine,
                       Qt.PenCapStyle.RoundCap))
         p.drawLine(c.x() - s, c.y() + s, c.x() + s, c.y() - s)
+        p.end()
+
+
+class BorderStrip(QWidget):
+    """Una de las cuatro tiras de color que forman el rectángulo alrededor de una
+    etiqueta. Ventana normal de color sólido (sin transparencias), situada por
+    fuera de la etiqueta: no tapa el nickname, las fichas ni el bounty."""
+
+    def __init__(self, table_hwnd: int):
+        super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+                         | Qt.WindowType.WindowDoesNotAcceptFocus | Qt.WindowType.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.table_hwnd = table_hwnd
+        self.color = "#ffffff"
+        self.active = False
+        self._owned = False
+        self.native = 0
+
+    def set_color(self, col: str):
+        if col != self.color:
+            self.color = col
+            self.update()
+
+    def ensure_owned(self):
+        if not self._owned:
+            self.native = _prepare_native(self, exclude_capture=True)
+            self._owned = True
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(self.color))
         p.end()

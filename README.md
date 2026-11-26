@@ -1,4 +1,4 @@
-# Nexa Notes 0.13.1
+# Nexa Notes 0.13.2
 
 Notas personales y etiquetas de colores para los jugadores de las mesas de Nexa Poker.
 Programa portable para Windows 10/11: un solo archivo `NexaNotes.exe`, sin instalar nada.
@@ -113,9 +113,10 @@ Para que una captura forme parte de las pruebas automáticas, guárdala en
   completo (con sugerencias de tu base de datos) y lo mantiene mientras siga ese jugador.
 
 ### Superposición
-- Cada overlay es una ventana **propiedad de su mesa**: Windows la mantiene justo encima de esa
-  mesa, la tapa cuando otra ventana tapa la mesa (solo se ve la parte visible), la oculta al
-  minimizar y no la muestra encima de otras aplicaciones.
+- Cada rectángulo de color son **4 tiras finas de color sólido** por fuera de la etiqueta, y el
+  botón del lápiz es otra ventana pequeña. Se colocan justo encima de su mesa en el orden de
+  ventanas (sin activarse): quedan tapadas por las mismas ventanas que tapan la mesa, se ocultan
+  al minimizarla y no aparecen encima de otras aplicaciones.
 - Coordenadas en píxeles físicos (escalado DPI desactivado en Qt), por lo que coinciden con
   las de Windows en cualquier escala y monitor.
 - La posición se sigue con llamadas Win32 muy ligeras cada 120 ms (sin capturas).
@@ -147,14 +148,15 @@ Para que una captura forme parte de las pruebas automáticas, guárdala en
 | Tipo | Estado |
 |---|---|
 | Sintaxis e importación de todos los módulos | ✔ hecho |
-| Pruebas automáticas (52) en Linux con Python 3.12 | ✔ pasan |
-| Detección con 3 capturas (incluida una real de tu Windows con otro fondo): todas las etiquetas, 0 falsos positivos, 7 tamaños por captura | ✔ hecho |
+| Pruebas automáticas (73) en Linux con Python 3.12 | ✔ pasan |
+| Detección con 5 capturas (3 reales de tu Windows, una con los botones Fold/Call): todas las etiquetas, 0 falsos positivos | ✔ hecho |
 | OCR con las 3 capturas: 20/20 nombres (latinos y chinos) | ✔ hecho |
 | Dibujo del overlay sobre tus capturas (posición de rectángulos) | ✔ hecho |
 | Compilación con PyInstaller + recursos incluidos + OCR dentro del binario | ✔ hecho **en Linux**; en Windows lo comprueba el workflow |
 | Interfaz (ventana principal, editor, ajustes, diagnóstico) | ✔ arranca sin errores en modo sin pantalla |
 | Windows real: detección de ventanas de Nexa (proceso «Nexa Poker.exe» + «Blinds») | ✔ comprobado por ti (v0.13.0) |
-| Windows real: captura de la mesa (nuevas variantes de PrintWindow en 0.13.1), overlay, DPI, varios monitores | ✘ pendiente de tu prueba |
+| Windows real: captura de la mesa | ✔ funciona copiando de la pantalla (la mesa debe estar visible); PrintWindow devuelve negro con Nexa |
+| Windows real: rectángulos de color con tiras sólidas (0.13.2) | ✘ pendiente de tu prueba |
 | Asientos vacíos reales, timebank real, bounty, otros fondos, mesas de 2–6 | ✘ sin capturas reales (simulados en pruebas) |
 
 ## 6. Normas de Nexa Poker

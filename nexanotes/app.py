@@ -21,7 +21,7 @@ from .db import Database
 from .editor import ColorButton, PlayerEditor
 from .engine import AnalysisWorker, match_tables
 from .ocr import OcrEngine
-from .overlay import SeatButton, TableOverlay
+from .overlay import BorderStrip, SeatButton, TableOverlay
 from .tracker import TRUNCATED_ST
 
 log = logging.getLogger(__name__)
@@ -41,9 +41,11 @@ class Controller(QObject):
         self.worker.table_updated.connect(self._on_table_updated, Qt.ConnectionType.QueuedConnection)
         self.overlays: dict[int, TableOverlay] = {}
         self.buttons: dict[int, list[SeatButton]] = {}
+        self.strips: dict[int, list[BorderStrip]] = {}  # 4 tiras por jugador con color
         self.geom: dict[int, tuple] = {}
         self.colors: dict[str, str] = {}
         self._seen: set[str] = set()
+        self.ui_error = ""
         self.last_scan_rejected = []
         self.last_scan_time = 0.0
         self.editor = PlayerEditor(lambda: self.settings["palette"], lambda: [p.nickname for p in self.db.list()])
@@ -95,7 +97,7 @@ class Controller(QObject):
         if ov:
             ov.hide()
             ov.deleteLater()
-        for b in self.buttons.pop(h, []):
+        for b in self.buttons.pop(h, []) + self.strips.pop(h, []):
             b.hide()
             b.deleteLater()
         self.geom.pop(h, None)
@@ -104,6 +106,13 @@ class Controller(QObject):
         return len(self.overlays)
 
     def reposition(self):
+        try:
+            self._reposition()
+        except Exception as e:  # nunca debe romper la interfaz; queda en el diagnóstico
+            self.ui_error = f"superposición: {type(e).__name__}: {e}"
+            log.exception("Error en la superposición")
+
+    def _reposition(self):
         for h, ov in list(self.overlays.items()):
             if not winapi.is_window(h):
                 self._remove_table(h)
@@ -113,7 +122,7 @@ class Controller(QObject):
             if rc is None or rc[2] < 50:
                 if ov.isVisible():
                     ov.hide()
-                for b in self.buttons.get(h, []):
+                for b in self.buttons.get(h, []) + self.strips.get(h, []):
                     b.hide()
                 self.geom.pop(h, None)
                 continue
@@ -127,12 +136,34 @@ class Controller(QObject):
                 ov.ensure_owned()
             elif not want and ov.isVisible():
                 ov.hide()
+            # orden de ventanas: dibujo justo encima de la mesa y botones encima del dibujo
+            below = h
+            if ov.isVisible():
+                winapi.place_just_above(ov.native, h)
+                below = ov.native
+            for st in self.strips.get(h, []):
+                if st.active:
+                    if not st.isVisible():
+                        st.show()
+                        st.ensure_owned()
+                    winapi.place_just_above(st.native, below)
+                    below = st.native
             for b in self.buttons.get(h, []):
-                if b.sid and self.settings["show_edit_buttons"] and not b.isVisible():
-                    b.show()
-                    b.ensure_owned()
+                if b.sid and self.settings["show_edit_buttons"]:
+                    if not b.isVisible():
+                        b.show()
+                        b.ensure_owned()
+                    winapi.place_just_above(b.native, below)
+                    below = b.native
 
     def _on_table_updated(self, hwnd: int):
+        try:
+            self._table_updated(hwnd)
+        except Exception as e:
+            self.ui_error = f"actualización: {type(e).__name__}: {e}"
+            log.exception("Error actualizando la mesa")
+
+    def _table_updated(self, hwnd: int):
         ov = self.overlays.get(hwnd)
         st = self.worker.snapshot(hwnd)
         if ov is None or st is None:
@@ -179,6 +210,20 @@ class Controller(QObject):
             else:
                 b.sid = 0
                 b.hide()
+        # tiras de color (4 por jugador con color asignado)
+        colored = [(s, ov._color_for(s)) for s in ov.view] if ov is not None else []
+        colored = [(s, c) for s, c in colored if c]
+        spool = self.strips.setdefault(hwnd, [])
+        while len(spool) < 4 * len(colored):
+            spool.append(BorderStrip(hwnd))
+        for i, st in enumerate(spool):
+            if i < 4 * len(colored):
+                seat, col = colored[i // 4]
+                st.sid, st.side, st.active = seat.sid, i % 4, True
+                st.set_color(col)
+            else:
+                st.active = False
+                st.hide()
         self._place_buttons(hwnd)
 
     def _place_buttons(self, hwnd):
@@ -196,9 +241,27 @@ class Controller(QObject):
                 continue
             x, y, w, h = s.rect
             size = int(max(14, min(26, h * sy * 0.42)))
-            bx = rc[0] + int((x + w) * sx) + 3
+            bx = rc[0] + int((x + w) * sx) + 1 + max(2, int(round(w * sx * 0.03))) + 3  # a la derecha del borde
             by = rc[1] + int(y * sy)
             b.setGeometry(bx, by, size, size)
+        for st in self.strips.get(hwnd, []):
+            s = seats.get(getattr(st, "sid", 0)) if st.active else None
+            if not s:
+                st.hide()
+                continue
+            x, y, w, h = s.rect
+            X, Y = rc[0] + int(round(x * sx)), rc[1] + int(round(y * sy))
+            Wd, Ht = int(round(w * sx)), int(round(h * sy))
+            t = max(2, int(round(Wd * 0.03)))   # grosor
+            g = 1                                # separación con la etiqueta
+            if st.side == 0:    # arriba
+                st.setGeometry(X - g - t, Y - g - t, Wd + 2 * (g + t), t)
+            elif st.side == 1:  # abajo
+                st.setGeometry(X - g - t, Y + Ht + g, Wd + 2 * (g + t), t)
+            elif st.side == 2:  # izquierda
+                st.setGeometry(X - g - t, Y - g, t, Ht + 2 * g)
+            else:               # derecha
+                st.setGeometry(X + Wd + g, Y - g, t, Ht + 2 * g)
 
     # -------------------------------------------------------------- colores
     def refresh_colors(self):
@@ -219,6 +282,7 @@ class Controller(QObject):
         self.settings["diagnostic"] = on
         for h, ov in self.overlays.items():
             ov.diagnostic = on
+            ov.set_capture_exclusion()
             ov.update()
             self._sync_buttons(h)
         self.reposition()
@@ -390,7 +454,8 @@ class DiagnosticsWindow(QWidget):
                    f"{e(str(APP_DIR / 'diagnostico'))}</p>")
         out.append(f"<p>OCR: {'error: ' + e(c.ocr.init_error) if c.ocr.init_error else 'listo'} · "
                    f"reconocimiento {'activado' if c.settings['recognition_enabled'] else 'desactivado'} · "
-                   f"último error: {e(c.worker.last_error) or 'ninguno'}</p>")
+                   f"último error de análisis: {e(c.worker.last_error) or 'ninguno'} · "
+                   f"último error de superposición: {e(c.ui_error) or 'ninguno'}</p>")
         out.append("<h4>Mesas identificadas</h4>")
         if not c.overlays:
             out.append("<p>Ninguna.</p>")
@@ -402,6 +467,16 @@ class DiagnosticsWindow(QWidget):
             out.append(f"<p><b>{e(st.title)}</b><br>proceso: {e(st.exe)} · ventana {h} · último análisis: {ago}"
                        f" · captura: {e(st.method)} · tiempos: {e(str(st.timings))}"
                        f"{'<br><span style=color:#c00>' + e(st.skipped or st.error) + '</span>' if (st.skipped or st.error) else ''}</p>")
+            ov = c.overlays.get(h)
+            if ov is not None:
+                g = ov.geometry()
+                encima = winapi.window_above(h)
+                out.append(f"<p>Superposición: {'visible' if ov.isVisible() else 'oculta'} · ventana {ov.native} · "
+                           f"posición ({g.x()}, {g.y()}, {g.width()}x{g.height()}) · mesa en "
+                           f"{c.geom.get(h)} · justo encima de la mesa: "
+                           f"{'nuestra superposición' if encima and encima == ov.native else encima}"
+                           f" · mesa siempre visible (topmost): {'sí' if winapi.is_topmost(h) else 'no'}"
+                           f" · estilo {hex(winapi.ex_style(ov.native)) if ov.native else '-'}</p>")
             out.append("<table border=1 cellspacing=0 cellpadding=3><tr><th>Asiento</th><th>Estado</th>"
                        "<th>Identidad</th><th>Última lectura OCR</th><th>Etiqueta (x,y,w,h)</th><th>Eventos</th></tr>")
             for s in st.view:

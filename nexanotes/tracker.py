@@ -179,12 +179,9 @@ class TableTracker:
         self._candidate(seat, t, avatar_changed, sig)
 
     def _candidate(self, seat: Seat, t: str, avatar_changed: bool, sig=None):
-        if avatar_changed and not t.endswith("…"):
-            self._log(f"asiento {seat.sid}: cambio de jugador {seat.name} -> {t} (avatar distinto)")
-            self._reset_identity(seat, "cambio con avatar distinto")
-            self._confirm(seat, t)
-            seat.avatar_sig = sig
-            return
+        # El avatar cambia también por motivos temporales (las cartas tapan parte
+        # del avatar, animaciones), así que un avatar distinto solo hace releer
+        # antes; el cambio de jugador siempre exige dos lecturas coincidentes.
         if seat.candidate and tr.same_player_text(seat.candidate, t):
             seat.candidate_hits += 1
         else:

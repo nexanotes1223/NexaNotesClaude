@@ -2,17 +2,17 @@ from nexanotes import textrules as tr
 
 
 def test_nombres():
-    for t in ["DuDu29", "烧烤哥弟", "one01s", "AhyeonBaby", "x_Pro-99", "123456"]:
+    for t in ["DuDu29", "烧烤哥弟", "one01s", "AhyeonBaby", "x_Pro-99", "123456", "嘉禄", "fire161", "Betty77"]:
         assert tr.classify(t, 0.95)[0] == tr.NAME, t
 
 
 def test_timebank():
-    for t in ["12", "5", "0:15", "15s", "9"]:
+    for t in ["12", "5", "0:15", "15s", "9", "時10時", "12個"]:
         assert tr.classify(t, 0.95)[0] == tr.TIMEBANK, t
 
 
 def test_acciones():
-    for t in ["All in", "ALL-IN", "Fold", "Check", "Call", "Sitting Out"]:
+    for t in ["All in", "ALL-IN", "Fold", "Check", "Call", "Sitting Out", "Call 0.5BB", "Raise 2BB"]:
         assert tr.classify(t, 0.95)[0] == tr.ACTION, t
 
 

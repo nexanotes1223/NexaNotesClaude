@@ -10,6 +10,8 @@ EXPECTED = {
     "MesaNexa.png": 7,        # mesa en pausa (oscurecida)
     "MesaNexafinal.png": 7,
     "MesaNexaReal2.png": 6,   # captura real de Windows: otro fondo, 6 jugadores, cartas en mesa
+    "MesaNexaReal3.png": 7,   # captura hecha por el propio programa, con timebank en un jugador
+    "MesaNexaReal4.png": 7,   # con los botones Fold / Call visibles (no son jugadores)
 }
 
 

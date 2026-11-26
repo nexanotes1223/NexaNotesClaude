@@ -127,7 +127,7 @@ def test_mesa_redimensionada_conserva_asientos():
     assert sorted(s.display_name for s in tr.seats) == sorted(base)
 
 
-def test_cambio_de_avatar_y_nombre_cambia_al_momento():
+def test_cambio_de_avatar_y_nombre_exige_dos_lecturas():
     tr = TableTracker(30)
     base = [f"P{i}x" for i in range(7)]
     run(tr, base, 0)
@@ -139,4 +139,6 @@ def test_cambio_de_avatar_y_nombre_cambia_al_momento():
     reads[0] = "Sustituto"
     d2 = detect_labels(img2)
     tr.update(img2, d2, FakeOcr(reads, img2, d2), now=3)
+    assert tr.seats[0].display_name is None  # en duda: sin color del anterior
+    tr.update(img2, d2, FakeOcr(reads, img2, d2), now=5)
     assert tr.seats[0].display_name == "Sustituto"

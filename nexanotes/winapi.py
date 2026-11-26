@@ -54,7 +54,7 @@ if IS_WINDOWS:
     user32.GetWindowLongPtrW.restype = LONG_PTR
     user32.SetWindowLongPtrW.argtypes = [HWND, ctypes.c_int, LONG_PTR]
     user32.SetWindowLongPtrW.restype = LONG_PTR
-    user32.SetWindowPos.argtypes = [HWND, HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
     user32.GetForegroundWindow.restype = HWND
     user32.GetWindowRect.argtypes = [HWND, ctypes.POINTER(wintypes.RECT)]
     user32.GetWindowDC.argtypes = [HWND]
@@ -64,6 +64,7 @@ if IS_WINDOWS:
     user32.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
     user32.GetAwarenessFromDpiAwarenessContext.argtypes = [ctypes.c_void_p]
     user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+    user32.SetWindowDisplayAffinity.argtypes = [HWND, wintypes.DWORD]
     gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
     gdi32.CreateCompatibleDC.restype = wintypes.HDC
     gdi32.CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
@@ -102,6 +103,12 @@ PW_RENDERFULLCONTENT = 0x2
 SRCCOPY = 0x00CC0020
 GA_ROOT = 2
 GW_OWNER = 4
+GW_HWNDPREV = 3
+HWND_TOP = 0
+HWND_TOPMOST = -1
+WDA_NONE = 0
+WDA_EXCLUDEFROMCAPTURE = 0x11
+SWP_SHOWWINDOW = 0x40
 DWMWA_CLOAKED = 14
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOZORDER = 0x1, 0x2, 0x10, 0x4
 SWP_NOOWNERZORDER = 0x200
@@ -391,6 +398,50 @@ def set_owner(child_hwnd: int, owner_hwnd: int) -> None:
     cuando la mesa se minimiza."""
     if IS_WINDOWS:
         user32.SetWindowLongPtrW(child_hwnd, GWLP_HWNDPARENT, owner_hwnd)
+
+
+def is_topmost(hwnd: int) -> bool:
+    if not IS_WINDOWS:
+        return False
+    return bool(user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)
+
+
+def window_above(hwnd: int) -> int:
+    """Ventana situada justo encima en el orden de ventanas (0 si es la primera)."""
+    if not IS_WINDOWS:
+        return 0
+    h = user32.GetWindow(hwnd, GW_HWNDPREV)
+    return int(h) if h else 0
+
+
+def place_just_above(our_hwnd: int, target_hwnd: int) -> None:
+    """Coloca nuestra ventana justo encima de target en el orden de ventanas, sin
+    activarla: queda tapada por las mismas ventanas que tapan la mesa."""
+    if not IS_WINDOWS:
+        return
+    above = window_above(target_hwnd)
+    if above == our_hwnd:
+        return
+    if above:
+        insert_after = above
+    else:
+        insert_after = HWND_TOPMOST if is_topmost(target_hwnd) else HWND_TOP
+    user32.SetWindowPos(our_hwnd, insert_after, 0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER)
+
+
+def exclude_from_capture(hwnd: int, exclude: bool) -> None:
+    """Hace invisible nuestra ventana para las capturas de pantalla (incluidas las
+    nuestras), para no analizar nuestros propios dibujos. Windows 10 2004 o superior."""
+    if IS_WINDOWS:
+        try:
+            user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE if exclude else WDA_NONE)
+        except Exception:
+            pass
+
+
+def ex_style(hwnd: int) -> int:
+    return int(user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) if IS_WINDOWS else 0
 
 
 def add_ex_style(hwnd: int, flags: int, remove: int = 0) -> None:

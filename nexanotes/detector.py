@@ -221,6 +221,10 @@ def _validate(rect: Rect, v: np.ndarray, m: np.ndarray) -> str | None:
     for name, part in (("nickname", bright[m0:h // 2, e:w - e]), ("fichas", bright[h // 2:h - m0, e:w - e])):
         if part.size == 0 or part.mean(1).max() < 0.04:
             return f"sin texto en la línea de {name}"
+        # una línea de texto real ocupa varias filas (una raya fina, como el
+        # subrayado de los botones Fold/Call, no cuenta como texto)
+        if (part.mean(1) >= 0.04).sum() < max(3, part.shape[0] * 0.3):
+            return f"la línea de {name} no parece texto"
         colsum = part.sum(0)
         cols = np.nonzero(colsum >= max(2, part.shape[0] * 0.15))[0]
         if len(cols) == 0:
