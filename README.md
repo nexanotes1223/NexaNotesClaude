@@ -1,4 +1,4 @@
-# Nexa Notes 0.13.2
+# Nexa Notes 0.13.3
 
 Notas personales y etiquetas de colores para los jugadores de las mesas de Nexa Poker.
 Programa portable para Windows 10/11: un solo archivo `NexaNotes.exe`, sin instalar nada.

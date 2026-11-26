@@ -65,6 +65,7 @@ if IS_WINDOWS:
     user32.GetAwarenessFromDpiAwarenessContext.argtypes = [ctypes.c_void_p]
     user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
     user32.SetWindowDisplayAffinity.argtypes = [HWND, wintypes.DWORD]
+    user32.GetClassNameW.argtypes = [HWND, wintypes.LPWSTR, ctypes.c_int]
     gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
     gdi32.CreateCompatibleDC.restype = wintypes.HDC
     gdi32.CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
@@ -329,6 +330,24 @@ def capture_client(hwnd: int) -> tuple[np.ndarray | None, str]:
         if not _is_blank(img):
             _last_method[hwnd] = name
             return img, name
+    # Capas propias de Nexa encima de la mesa: el contenido puede estar en ellas.
+    for layer in table_layers(hwnd):
+        lr = window_rect(layer)
+        if not lr:
+            continue
+        lx, ly, lw, lh = lr
+        dx, dy = cx - lx, cy - ly
+        if dx < 0 or dy < 0 or dx + cw > lw or dy + ch > lh:
+            continue
+        for flags, name in ((PW_RENDERFULLCONTENT, "PrintWindow-capa"), (0, "PrintWindow-capa-clasico")):
+            try:
+                full = _print_window(layer, lw, lh, flags)
+            except Exception:  # pragma: no cover
+                full = None
+            if full is not None:
+                img = np.ascontiguousarray(full[dy:dy + ch, dx:dx + cw])
+                if not _is_blank(img):
+                    return img, f"{name} {layer}"
     img = _screen_grab(cx, cy, cw, ch)
     if not _is_blank(img):
         _last_method.pop(hwnd, None)
@@ -345,6 +364,7 @@ def is_fully_visible(hwnd: int) -> bool:
     if not rc:
         return False
     x, y, w, h = rc
+    own = {int(hwnd), *table_layers(hwnd)}
     for fx in (0.05, 0.5, 0.95):
         for fy in (0.05, 0.5, 0.95):
             p = wintypes.POINT(int(x + w * fx), int(y + h * fy))
@@ -352,7 +372,7 @@ def is_fully_visible(hwnd: int) -> bool:
             root = user32.GetAncestor(hit, GA_ROOT) if hit else None
             if not root:
                 return False
-            if int(root) == int(hwnd):
+            if int(root) in own or window_pid(int(root)) == os.getpid():
                 continue
             owner = user32.GetWindow(root, GW_OWNER)
             if owner and int(owner) == int(hwnd):
@@ -412,6 +432,87 @@ def window_above(hwnd: int) -> int:
         return 0
     h = user32.GetWindow(hwnd, GW_HWNDPREV)
     return int(h) if h else 0
+
+
+def window_pid(hwnd: int) -> int:
+    if not IS_WINDOWS or not hwnd:
+        return 0
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return int(pid.value)
+
+
+def window_owner(hwnd: int) -> int:
+    if not IS_WINDOWS or not hwnd:
+        return 0
+    h = user32.GetWindow(hwnd, GW_OWNER)
+    return int(h) if h else 0
+
+
+def window_title(hwnd: int) -> str:
+    if not IS_WINDOWS or not hwnd:
+        return ""
+    n = user32.GetWindowTextLengthW(hwnd)
+    buf = ctypes.create_unicode_buffer(max(1, n + 1))
+    user32.GetWindowTextW(hwnd, buf, n + 1)
+    return buf.value
+
+
+def window_class(hwnd: int) -> str:
+    if not IS_WINDOWS or not hwnd:
+        return ""
+    buf = ctypes.create_unicode_buffer(256)
+    user32.GetClassNameW(hwnd, buf, 256)
+    return buf.value
+
+
+def describe_window(hwnd: int) -> str:
+    """Texto para el diagnóstico: clase, título, proceso, propietario y posición."""
+    if not hwnd:
+        return "ninguna"
+    return (f"{hwnd} [{window_class(hwnd)}] «{window_title(hwnd)[:40]}» proceso {process_exe(window_pid(hwnd))}"
+            f" propietario {window_owner(hwnd)} rect {window_rect(hwnd)}"
+            f"{' visible' if is_visible(hwnd) else ' oculta'}")
+
+
+def _overlaps(a, b, tol=0.8) -> bool:
+    if not a or not b:
+        return False
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ix = max(0, min(ax + aw, bx + bw) - max(ax, bx))
+    iy = max(0, min(ay + ah, by + bh) - max(ay, by))
+    return ix * iy >= tol * max(1, min(aw * ah, bw * bh))
+
+
+def table_layers(table_hwnd: int, title_keyword: str = "Blinds") -> list[int]:
+    """Ventanas del propio cliente situadas justo encima de la mesa que forman
+    parte de ella (capa de contenido, animaciones...): propiedad de la mesa, o del
+    mismo proceso, sin ser otra mesa y cubriendo la misma zona. De abajo arriba."""
+    if not IS_WINDOWS:
+        return []
+    pid = window_pid(table_hwnd)
+    rc = window_rect(table_hwnd)
+    out = []
+    h = window_above(table_hwnd)
+    steps = 0
+    while h and steps < 30:
+        steps += 1
+        if is_visible(h):
+            same = window_pid(h) == pid
+            owned = window_owner(h) == table_hwnd
+            other_table = title_keyword.lower() in window_title(h).lower()
+            if owned or (same and not other_table and _overlaps(window_rect(h), rc)):
+                out.append(h)
+            elif same and other_table:
+                break  # otra mesa encima: no seguir
+            elif not same:
+                # ventana de otra aplicación (o nuestra): se sigue buscando solo
+                # si es pequeña y no tapa la mesa (p. ej. nuestros botones)
+                if _overlaps(window_rect(h), rc, 0.3) and window_pid(h) != os.getpid():
+                    break
+        h = window_above(h)
+    return out
 
 
 def place_just_above(our_hwnd: int, target_hwnd: int) -> None:

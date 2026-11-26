@@ -42,6 +42,7 @@ class Controller(QObject):
         self.overlays: dict[int, TableOverlay] = {}
         self.buttons: dict[int, list[SeatButton]] = {}
         self.strips: dict[int, list[BorderStrip]] = {}  # 4 tiras por jugador con color
+        self.layers: dict[int, list[int]] = {}           # capas de Nexa encima de cada mesa
         self.geom: dict[int, tuple] = {}
         self.colors: dict[str, str] = {}
         self._seen: set[str] = set()
@@ -137,9 +138,13 @@ class Controller(QObject):
             elif not want and ov.isVisible():
                 ov.hide()
             # orden de ventanas: dibujo justo encima de la mesa y botones encima del dibujo
-            below = h
+            # Nexa dibuja la mesa con capas propias encima de la ventana principal:
+            # nuestras ventanas van por encima de la capa más alta de esa mesa.
+            layers = winapi.table_layers(h, self.settings["title_keyword"])
+            self.layers[h] = layers
+            below = layers[-1] if layers else h
             if ov.isVisible():
-                winapi.place_just_above(ov.native, h)
+                winapi.place_just_above(ov.native, below)
                 below = ov.native
             for st in self.strips.get(h, []):
                 if st.active:
@@ -471,6 +476,16 @@ class DiagnosticsWindow(QWidget):
             if ov is not None:
                 g = ov.geometry()
                 encima = winapi.window_above(h)
+                capas = c.layers.get(h, [])
+                out.append("<p>Capas de Nexa encima de la mesa: " + (
+                    "<br>".join(e(winapi.describe_window(x)) for x in capas) or "ninguna") + "</p>")
+                encima_txt = e(winapi.describe_window(winapi.window_above(capas[-1] if capas else h)))
+                activos = [st for st in c.strips.get(h, []) if st.active]
+                botones = [b for b in c.buttons.get(h, []) if b.sid]
+                out.append(f"<p>Encima de la capa más alta: {encima_txt}<br>"
+                           f"Tiras de color activas: {len(activos)} (visibles {sum(st.isVisible() for st in activos)})"
+                           f" · botones: {len(botones)} (visibles {sum(b.isVisible() for b in botones)})"
+                           f"{' · primera tira ' + str(activos[0].geometry().getRect()) if activos else ''}</p>")
                 out.append(f"<p>Superposición: {'visible' if ov.isVisible() else 'oculta'} · ventana {ov.native} · "
                            f"posición ({g.x()}, {g.y()}, {g.width()}x{g.height()}) · mesa en "
                            f"{c.geom.get(h)} · justo encima de la mesa: "
