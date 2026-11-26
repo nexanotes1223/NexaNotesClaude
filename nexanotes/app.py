@@ -43,6 +43,7 @@ class Controller(QObject):
         self.buttons: dict[int, list[SeatButton]] = {}
         self.strips: dict[int, list[BorderStrip]] = {}  # 4 tiras por jugador con color
         self.layers: dict[int, list[int]] = {}           # capas de Nexa encima de cada mesa
+        self.visible_count: dict[int, int] = {}          # etiquetas visibles (no tapadas) por mesa
         self.geom: dict[int, tuple] = {}
         self.colors: dict[str, str] = {}
         self._seen: set[str] = set()
@@ -138,28 +139,40 @@ class Controller(QObject):
             elif not want and ov.isVisible():
                 ov.hide()
             # orden de ventanas: dibujo justo encima de la mesa y botones encima del dibujo
-            # Nexa dibuja la mesa con capas propias encima de la ventana principal:
-            # nuestras ventanas van por encima de la capa más alta de esa mesa.
-            layers = winapi.table_layers(h, self.settings["title_keyword"])
-            self.layers[h] = layers
-            below = winapi.group_top(layers[-1] if layers else h)
-            if ov.isVisible():
-                winapi.place_just_above(ov.native, below)
-                below = ov.native
+            # Visibilidad real de cada etiqueta: nuestras ventanas son "siempre
+            # visibles" (así nunca quedan detrás de la mesa) y se ocultan las de cada
+            # jugador cuya etiqueta tapa otra ventana (otra aplicación, otra mesa...).
+            visible_sids = self._visible_seats(h, rc, ov)
             for st in self.strips.get(h, []):
-                if st.active:
-                    if not st.isVisible():
-                        st.show()
-                        st.ensure_owned()
-                    winapi.place_just_above(st.native, below)
-                    below = st.native
+                show = st.active and st.sid in visible_sids
+                self._show_topmost(st, show)
             for b in self.buttons.get(h, []):
-                if b.sid and self.settings["show_edit_buttons"]:
-                    if not b.isVisible():
-                        b.show()
-                        b.ensure_owned()
-                    winapi.place_just_above(b.native, below)
-                    below = b.native
+                show = bool(b.sid) and self.settings["show_edit_buttons"] and b.sid in visible_sids
+                self._show_topmost(b, show)
+
+    def _show_topmost(self, w, show: bool):
+        if show:
+            if not w.isVisible():
+                w.show()
+                w.ensure_owned()
+                winapi.set_topmost(w.native)
+        elif w.isVisible():
+            w.hide()
+
+    def _visible_seats(self, h, rc, ov) -> set:
+        """Asientos cuya etiqueta se ve entera (5 puntos: centro y esquinas interiores)."""
+        fw, fh = ov.frame_size
+        sx, sy = rc[2] / max(1, fw), rc[3] / max(1, fh)
+        out = set()
+        for s in ov.view:
+            x, y, w, hh = s.rect
+            X, Y, W, Hh = rc[0] + x * sx, rc[1] + y * sy, w * sx, hh * sy
+            pts = [(X + W / 2, Y + Hh / 2), (X + W * 0.1, Y + Hh * 0.15), (X + W * 0.9, Y + Hh * 0.15),
+                   (X + W * 0.1, Y + Hh * 0.85), (X + W * 0.9, Y + Hh * 0.85)]
+            if all(winapi.point_shows_table(h, px, py) for px, py in pts):
+                out.add(s.sid)
+        self.visible_count[h] = len(out)
+        return out
 
     def _on_table_updated(self, hwnd: int):
         try:
@@ -480,26 +493,14 @@ class DiagnosticsWindow(QWidget):
                        f"{'<br><span style=color:#c00>' + e(st.skipped or st.error) + '</span>' if (st.skipped or st.error) else ''}</p>")
             ov = c.overlays.get(h)
             if ov is not None:
-                g = ov.geometry()
-                encima = winapi.window_above(h)
-                capas = c.layers.get(h, [])
-                out.append("<p>Capas de Nexa encima de la mesa: " + (
-                    "<br>".join(e(winapi.describe_window(x)) for x in capas) or "ninguna") + "</p>")
-                gt = winapi.group_top(capas[-1] if capas else h)
-                encima_txt = (f"grupo de la mesa hasta {e(winapi.describe_window(gt))}<br>encima del grupo: "
-                              f"{e(winapi.describe_window(winapi.window_above(gt)))}")
-                activos = [st for st in c.strips.get(h, []) if st.active]
+                activos = [x for x in c.strips.get(h, []) if x.active]
                 botones = [b for b in c.buttons.get(h, []) if b.sid]
-                out.append(f"<p>Encima de la capa más alta: {encima_txt}<br>"
-                           f"Tiras de color activas: {len(activos)} (visibles {sum(st.isVisible() for st in activos)})"
-                           f" · botones: {len(botones)} (visibles {sum(b.isVisible() for b in botones)})"
-                           f"{' · primera tira ' + str(activos[0].geometry().getRect()) if activos else ''}</p>")
-                out.append(f"<p>Superposición: {'visible' if ov.isVisible() else 'oculta'} · ventana {ov.native} · "
-                           f"posición ({g.x()}, {g.y()}, {g.width()}x{g.height()}) · mesa en "
-                           f"{c.geom.get(h)} · justo encima de la mesa: "
-                           f"{'nuestra superposición' if encima and encima == ov.native else encima}"
-                           f" · mesa siempre visible (topmost): {'sí' if winapi.is_topmost(h) else 'no'}"
-                           f" · estilo {hex(winapi.ex_style(ov.native)) if ov.native else '-'}</p>")
+                out.append(f"<p>Etiquetas visibles en pantalla (no tapadas): {c.visible_count.get(h, 0)} de "
+                           f"{len(st.view)} · tiras de color activas: {len(activos)} (mostradas "
+                           f"{sum(x.isVisible() for x in activos)}) · botones: {len(botones)} (mostrados "
+                           f"{sum(b.isVisible() for b in botones)})"
+                           f"{' · primera tira ' + str(activos[0].geometry().getRect()) if activos else ''}"
+                           f" · mesa en {c.geom.get(h)}</p>")
             out.append("<table border=1 cellspacing=0 cellpadding=3><tr><th>Asiento</th><th>Estado</th>"
                        "<th>Identidad</th><th>Última lectura OCR</th><th>Etiqueta (x,y,w,h)</th><th>Eventos</th></tr>")
             for s in st.view:

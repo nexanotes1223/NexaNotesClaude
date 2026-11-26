@@ -158,6 +158,8 @@ class TableTracker:
                 # prefijo distinto: tratar como posible cambio
                 self._candidate(seat, t + "…", avatar_changed, sig)
                 return
+            if seat.status == TRUNCATED_ST and seat.truncated_prefix == t:
+                return  # sigue igual: nada que cambiar
             self._reset_identity(seat, f"truncado '{t}…'")
             seat.truncated_prefix = t
             seat.status = TRUNCATED_ST

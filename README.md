@@ -1,4 +1,4 @@
-# Nexa Notes 0.13.5
+# Nexa Notes 0.13.6
 
 Notas personales y etiquetas de colores para los jugadores de las mesas de Nexa Poker.
 Programa portable para Windows 10/11: un solo archivo `NexaNotes.exe`, sin instalar nada.
@@ -114,9 +114,10 @@ Para que una captura forme parte de las pruebas automáticas, guárdala en
 
 ### Superposición
 - Cada rectángulo de color son **4 tiras finas de color sólido** por fuera de la etiqueta, y el
-  botón del lápiz es otra ventana pequeña. Se colocan justo encima de su mesa en el orden de
-  ventanas (sin activarse): quedan tapadas por las mismas ventanas que tapan la mesa, se ocultan
-  al minimizarla y no aparecen encima de otras aplicaciones.
+  botón del lápiz es otra ventana pequeña. Son ventanas «siempre visibles» (sin activarse ni robar
+  el foco) y, unas 8 veces por segundo, se comprueba en 5 puntos si la etiqueta de cada jugador
+  se ve realmente: si otra ventana la tapa (otra aplicación, otra mesa o Nexa Notes), se ocultan
+  el rectángulo y el botón de ese jugador. También se ocultan al minimizar la mesa.
 - Coordenadas en píxeles físicos (escalado DPI desactivado en Qt), por lo que coinciden con
   las de Windows en cualquier escala y monitor.
 - La posición se sigue con llamadas Win32 muy ligeras cada 120 ms (sin capturas).
@@ -156,7 +157,7 @@ Para que una captura forme parte de las pruebas automáticas, guárdala en
 | Interfaz (ventana principal, editor, ajustes, diagnóstico) | ✔ arranca sin errores en modo sin pantalla |
 | Windows real: detección de ventanas de Nexa (proceso «Nexa Poker.exe» + «Blinds») | ✔ comprobado por ti (v0.13.0) |
 | Windows real: captura de la mesa | ✔ funciona copiando de la pantalla (la mesa debe estar visible); PrintWindow devuelve negro con Nexa |
-| Windows real: rectángulos de color con tiras sólidas (0.13.2) | ✘ pendiente de tu prueba |
+| Windows real: rectángulos de color (0.13.6, siempre visibles + comprobación de tapado) | ✘ pendiente de tu prueba |
 | Asientos vacíos reales, timebank real, bounty, otros fondos, mesas de 2–6 | ✘ sin capturas reales (simulados en pruebas) |
 
 ## 6. Normas de Nexa Poker

@@ -533,6 +533,34 @@ def group_top(table_hwnd: int) -> int:
     return top
 
 
+def belongs_to(hwnd: int, table_hwnd: int) -> bool:
+    """¿La ventana es la mesa o una ventana que pertenece a ella (directa o
+    indirectamente, p. ej. IME → MSCTFIME)?"""
+    steps = 0
+    while hwnd and steps < 10:
+        if hwnd == table_hwnd:
+            return True
+        hwnd = window_owner(hwnd)
+        steps += 1
+    return False
+
+
+def point_shows_table(table_hwnd: int, x: int, y: int) -> bool:
+    """¿En ese punto de la pantalla se ve la mesa (no la tapa ninguna otra ventana)?"""
+    if not IS_WINDOWS:
+        return False
+    hit = user32.WindowFromPoint(wintypes.POINT(int(x), int(y)))
+    if not hit:
+        return False
+    root = user32.GetAncestor(hit, GA_ROOT)
+    return bool(root) and belongs_to(int(root), table_hwnd)
+
+
+def set_topmost(hwnd: int) -> None:
+    if IS_WINDOWS:
+        user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+
+
 def place_just_above(our_hwnd: int, target_hwnd: int) -> None:
     """Coloca nuestra ventana justo encima de target en el orden de ventanas, sin
     activarla: queda tapada por las mismas ventanas que tapan la mesa."""
