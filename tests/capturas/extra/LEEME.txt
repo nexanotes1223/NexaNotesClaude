@@ -1,0 +1,5 @@
+Guarda aquí capturas de mesas de Nexa Poker (formato PNG).
+Termina el nombre con el número de jugadores que deberían detectarse:
+    mesa_bounty_8.png        -> 8 etiquetas
+    mesa_6max_2vacios_4.png  -> 4 etiquetas
+Las pruebas automáticas comprobarán cada captura al compilar.
